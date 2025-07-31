@@ -1,6 +1,10 @@
 # Use an official Python image
 FROM python:3.11-slim
 
+# Environment variables for cleaner logging and no .pyc files
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
 # Install system dependencies and tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
@@ -31,10 +35,13 @@ RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
     apt-get install -y google-cloud-cli && \
     rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip and install Python dependencies
+# Copy and install Python dependencies
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Set working directory
+# Set working directory and copy application files
 WORKDIR /workspace
+COPY . .
 
+# Run the Flask app by default
+CMD ["python", "app.py"]
