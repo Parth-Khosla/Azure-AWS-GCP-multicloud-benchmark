@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GCP Benchmark Tool</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        .banner {
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .banner a {
+            color: #00FFAA;
+            text-decoration: none;
+            font-weight: bold;
+            margin: 0 10px;
+        }
+
+        pre {
+            background: black;
+            color: #00FF00;
+            padding: 10px;
+            border: 1px solid #ccc;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="banner">
+        📊 <a href="/report">View GCP Environment Report</a>
+    </div>
+
+    <h1>GCP Benchmark Tool</h1>
+
+    <form action="/run-fetch">
+        <button type="submit">Fetch & Show GCP Info</button>
+    </form>
+    <br>
+
+    <form action="/start-login">
+        <button type="submit">Start gcloud Login</button>
+    </form>
+    <br>
+
+    <form action="/submit-auth-code" method="post">
+        <label for="auth_code">Enter Auth Code:</label>
+        <input type="text" id="auth_code" name="auth_code" required>
+        <button type="submit">Submit Auth Code</button>
+    </form>
+
+    <h3>gcloud Login Terminal</h3>
+    <pre id="terminal">
+{{ login_output }}
+    </pre>
+</body>
+</html>
