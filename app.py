@@ -61,4 +61,4 @@ def show_report():
     return render_template("report.html")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=7342)
+    app.run(host="0.0.0.0", port=7432)
