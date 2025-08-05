@@ -1,8 +1,42 @@
 import subprocess
 import json
-import os
 from pathlib import Path
-import pandas as pd
+from tabulate import tabulate
+from datetime import datetime
+
+TEMPLATES_DIR = Path("templates")
+TEMPLATES_DIR.mkdir(exist_ok=True)
+
+CSS_STYLE = """
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        background: #f9f9f9;
+    }
+    h2 {
+        color: #333;
+        margin-top: 40px;
+    }
+    table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-bottom: 40px;
+    }
+    th, td {
+        border: 1px solid #ccc;
+        padding: 10px;
+        text-align: left;
+    }
+    th {
+        background-color: #f0f0f0;
+        font-weight: bold;
+    }
+    tr:nth-child(even) {
+        background-color: #fafafa;
+    }
+</style>
+"""
 
 def run_gcloud_cmd(cmd):
     try:
@@ -11,24 +45,36 @@ def run_gcloud_cmd(cmd):
     except subprocess.CalledProcessError:
         return {}
 
-def pretty_print_json(obj):
-    return json.dumps(obj, indent=2)
+def export_html(tables, output_path):
+    with open(output_path, "w") as f:
+        f.write("<html><head><title>GCP Report</title>")
+        f.write(CSS_STYLE)
+        f.write("</head><body>\n")
+
+        f.write(f"<h1>GCP Environment Report</h1><p>Generated at {datetime.now()}</p>\n")
+
+        for title, headers, rows in tables:
+            html_table = tabulate(rows, headers=headers, tablefmt="html")
+            f.write(f"<h2>{title}</h2>\n{html_table}\n")
+
+        f.write("</body></html>")
+    print(f"💾 Styled HTML exported to {output_path}")
 
 def main():
-    output_file = Path("gcp_env_report.json")
-    templates_dir = Path("templates")
-    templates_dir.mkdir(exist_ok=True)
+    output_json = Path("gcp_env_report.json")
+    output_html = TEMPLATES_DIR / "report.html"
 
     config = run_gcloud_cmd(["gcloud", "config", "list", "--format=json"])
     current_project = config.get("core", {}).get("project", "")
     projects = run_gcloud_cmd(["gcloud", "projects", "list", "--format=json"])
 
-    services = []
     if current_project:
         services = run_gcloud_cmd([
             "gcloud", "services", "list", "--enabled",
             f"--project={current_project}", "--format=json"
         ])
+    else:
+        services = []
 
     report = {
         "projects": projects,
@@ -36,90 +82,26 @@ def main():
         "gcloud_config": config
     }
 
-    # Save JSON
-    with open(output_file, "w") as f:
+    # Save JSON for backup/reference
+    with open(output_json, "w") as f:
         json.dump(report, f, indent=2)
 
-    # Convert to tables
-    df_projects = pd.DataFrame(projects)
-    df_config = pd.json_normalize(config)
+    # Prepare data for HTML
+    tables = []
 
-    # Normalize services or fallback to pretty-print
-    if services and isinstance(services, list):
+    if projects:
+        project_rows = [[p["projectId"], p.get("name", ""), p.get("lifecycleState", "")] for p in projects]
+        tables.append(("Projects", ["Project ID", "Name", "Lifecycle"], project_rows))
+
+    if services:
         try:
-            df_services = pd.json_normalize(services)
+            service_rows = [[s["config"]["name"], s["config"]["title"]] for s in services]
         except Exception:
-            # fallback if normalization fails
-            df_services = pd.DataFrame([{"service": pretty_print_json(s)} for s in services])
-    else:
-        df_services = pd.DataFrame([{"No services found": "N/A"}])
+            service_rows = [["[Error extracting service data]", ""]]
+        tables.append(("Enabled Services", ["Service Name", "Title"], service_rows))
 
-    # CSS Styling
-    css = """
-    <style>
-    body {
-        font-family: Arial, sans-serif;
-        margin: 40px;
-        background-color: #f8f9fa;
-        color: #212529;
-    }
-    h1 {
-        text-align: center;
-        color: #343a40;
-    }
-    h2 {
-        color: #343a40;
-        border-bottom: 2px solid #dee2e6;
-        padding-bottom: 5px;
-        margin-top: 40px;
-    }
-    table {
-        border-collapse: collapse;
-        width: 100%;
-        margin-bottom: 30px;
-        background-color: #fff;
-    }
-    th, td {
-        border: 1px solid #dee2e6;
-        text-align: left;
-        padding: 8px;
-        vertical-align: top;
-        word-wrap: break-word;
-        white-space: pre-wrap;
-    }
-    th {
-        background-color: #e9ecef;
-    }
-    tr:nth-child(even) {
-        background-color: #f1f3f5;
-    }
-    </style>
-    """
-
-    # Generate HTML content
-    html_content = f"""
-    <html>
-    <head>
-        <meta charset="UTF-8">
-        <title>GCP Environment Report</title>
-        {css}
-    </head>
-    <body>
-        <h1>GCP Environment Report</h1>
-        <h2>Projects</h2>
-        {df_projects.to_html(index=False, escape=False)}
-        <h2>Enabled Services</h2>
-        {df_services.to_html(index=False, escape=False)}
-        <h2>gcloud Config</h2>
-        {df_config.to_html(index=False, escape=False)}
-    </body>
-    </html>
-    """
-
-    with open(templates_dir / "report.html", "w", encoding="utf-8") as f:
-        f.write(html_content)
-
-    print(f"✅ Report saved to '{templates_dir / 'report.html'}'")
+    export_html(tables, output_html)
+    print(f"✅ Report saved to: {output_html.resolve()}")
 
 if __name__ == "__main__":
     main()
