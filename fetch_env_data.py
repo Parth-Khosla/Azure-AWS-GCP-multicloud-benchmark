@@ -1,3 +1,19 @@
+import subprocess
+import json
+import os
+from pathlib import Path
+import pandas as pd
+
+def run_gcloud_cmd(cmd):
+    try:
+        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+        return json.loads(output)
+    except subprocess.CalledProcessError:
+        return {}
+
+def pretty_print_json(obj):
+    return json.dumps(obj, indent=2)
+
 def main():
     output_file = Path("gcp_env_report.json")
     templates_dir = Path("templates")
@@ -24,12 +40,21 @@ def main():
     with open(output_file, "w") as f:
         json.dump(report, f, indent=2)
 
-    # Convert to table and save as HTML
+    # Convert to tables
     df_projects = pd.DataFrame(projects)
-    df_services = pd.DataFrame(services)
     df_config = pd.json_normalize(config)
 
-    # Simple CSS for styling tables
+    # Normalize services or fallback to pretty-print
+    if services and isinstance(services, list):
+        try:
+            df_services = pd.json_normalize(services)
+        except Exception:
+            # fallback if normalization fails
+            df_services = pd.DataFrame([{"service": pretty_print_json(s)} for s in services])
+    else:
+        df_services = pd.DataFrame([{"No services found": "N/A"}])
+
+    # CSS Styling
     css = """
     <style>
     body {
@@ -38,10 +63,15 @@ def main():
         background-color: #f8f9fa;
         color: #212529;
     }
+    h1 {
+        text-align: center;
+        color: #343a40;
+    }
     h2 {
         color: #343a40;
         border-bottom: 2px solid #dee2e6;
         padding-bottom: 5px;
+        margin-top: 40px;
     }
     table {
         border-collapse: collapse;
@@ -53,6 +83,9 @@ def main():
         border: 1px solid #dee2e6;
         text-align: left;
         padding: 8px;
+        vertical-align: top;
+        word-wrap: break-word;
+        white-space: pre-wrap;
     }
     th {
         background-color: #e9ecef;
@@ -63,6 +96,7 @@ def main():
     </style>
     """
 
+    # Generate HTML content
     html_content = f"""
     <html>
     <head>
@@ -82,7 +116,10 @@ def main():
     </html>
     """
 
-    with open(templates_dir / "report.html", "w") as f:
+    with open(templates_dir / "report.html", "w", encoding="utf-8") as f:
         f.write(html_content)
 
     print(f"✅ Report saved to '{templates_dir / 'report.html'}'")
+
+if __name__ == "__main__":
+    main()
