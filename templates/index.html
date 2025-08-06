@@ -6,12 +6,20 @@
 <body>
     <h1>Welcome to the GCP Benchmark Tool</h1>
     <p>Timestamp: {{ timestamp }}</p>
-    
+
     <form action="{{ url_for('fetch') }}" method="get">
         <button type="submit">Fetch & Show GCP Info</button>
     </form>
 
     <br/>
+
+    <form action="{{ url_for('fetch_os') }}" method="get">
+        <button type="submit">Fetch GCP OS Images</button>
+    </form>
+
+    <br/>
     <a href="{{ url_for('report') }}">View Last Report</a>
+    <br/>
+    <a href="{{ url_for('view_os_images') }}">View Last OS Images</a>
 </body>
 </html>
