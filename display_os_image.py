@@ -1,8 +1,8 @@
-import json
 import os
+import json
 from tabulate import tabulate
 
-def display_os_images(input_file="os_images.json", html_output_file="templates/os_images.html"):
+def display_os_images(input_file="os_images.json", html_output_file=None):
     with open(input_file, "r") as f:
         os_data = json.load(f)
 
@@ -18,10 +18,13 @@ def display_os_images(input_file="os_images.json", html_output_file="templates/o
                 info.get("creationTimestamp", "N/A")
             ])
 
+    # Print to terminal
+    print(tabulate(table_data, headers=headers, tablefmt="grid"))
+
+    # Convert to HTML table
     html_table = tabulate(table_data, headers=headers, tablefmt="html")
 
     styled_html = f"""
-    <!DOCTYPE html>
     <html>
     <head>
         <title>GCP OS Images</title>
@@ -37,13 +40,14 @@ def display_os_images(input_file="os_images.json", html_output_file="templates/o
             th {{
                 background-color: #4CAF50;
                 color: white;
+                font-weight: bold;
             }}
             th, td {{
                 border: 1px solid #ddd;
                 padding: 8px;
                 text-align: left;
             }}
-            tr:nth-child(even) {{background-color: #f2f2f2;}}
+            tr:nth-child(even) {{background-color: #f2f2f2}}
             tr:hover {{background-color: #ddd;}}
         </style>
     </head>
@@ -54,7 +58,11 @@ def display_os_images(input_file="os_images.json", html_output_file="templates/o
     </html>
     """
 
-    os.makedirs("templates", exist_ok=True)
+    # Save to templates directory if no path provided
+    if html_output_file is None:
+        templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+        html_output_file = os.path.join(templates_dir, "os_images.html")
+
     with open(html_output_file, "w") as f:
         f.write(styled_html)
 
