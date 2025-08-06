@@ -60,7 +60,9 @@ def display_os_images(input_file="os_images.json", html_output_file=None):
 
     # Save to templates directory if no path provided
     if html_output_file is None:
-        templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        templates_dir = os.path.join(base_dir, "templates")
+        os.makedirs(templates_dir, exist_ok=True)  # ✅ Ensure templates/ exists
         html_output_file = os.path.join(templates_dir, "os_images.html")
 
     with open(html_output_file, "w") as f:
