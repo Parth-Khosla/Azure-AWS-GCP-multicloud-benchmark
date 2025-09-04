@@ -1,0 +1,1 @@
+contains the files to create a devcontainer for sandboxed environment if user wishes to change the code and check how the changes affect without having to install the sdk tools

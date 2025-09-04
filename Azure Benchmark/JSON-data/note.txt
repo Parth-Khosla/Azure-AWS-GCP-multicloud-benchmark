@@ -1,0 +1,1 @@
+stores the json data retrieved and generated through the benchmark

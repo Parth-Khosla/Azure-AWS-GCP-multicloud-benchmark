@@ -1,0 +1,1 @@
+stores blueprints and templates for the flask app

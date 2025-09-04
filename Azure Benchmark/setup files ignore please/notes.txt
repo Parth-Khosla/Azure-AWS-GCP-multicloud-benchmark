@@ -1,0 +1,15 @@
+setup.sh usage:
+
+What this does:
+
+Checks for Python 3 and pip3.
+
+Creates a .venv virtual environment if it doesn’t exist.
+
+Installs dependencies from requirements.txt.
+
+Ensures Azure CLI is installed.
+
+Creates your project’s required folders (JSON-data, logs, Templates, etc.).
+
+Reminds you to run az login.

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Azure Region Selector</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f8f9fa; }
+        h1 { color: #0078D4; }
+        form { margin-top: 20px; }
+        .region-box { margin: 5px 0; }
+        button { background-color: #0078D4; color: white; padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; }
+        button:hover { background-color: #005fa3; }
+    </style>
+</head>
+<body>
+    <h1>Select Azure Regions</h1>
+    <form method="POST">
+        {% for region in regions %}
+            <div class="region-box">
+                <label>
+                    <input type="checkbox" name="selected_regions" value="{{ region['name'] }}"
+                        {% if region['name'] in preselected %}checked{% endif %}>
+                    {{ region['displayName'] }} ({{ region['name'] }})
+                </label>
+            </div>
+        {% endfor %}
+        <button type="submit">Save Selection</button>
+    </form>
+    {% if saved %}
+        <p style="color: green;">✅ Saved selection to {{ selected_file }}</p>
+    {% endif %}
+</body>
+</html>

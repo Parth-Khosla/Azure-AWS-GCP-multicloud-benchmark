@@ -1,0 +1,22 @@
+  GNU nano 7.2                                                                      templates/index.html                                                                                
+<!doctype html>
+<html>
+<head>
+  <title>Available Regions</title>
+</head>
+<body>
+  <h1>Choose a Region</h1>
+  <ul>
+    {% for region in regions %}
+      <li>
+        <a href="{{ url_for('region_selector.region_page', name=region) }}">
+          {{ region }}
+        </a>
+      </li>
+    {% else %}
+      <li>No regions available.</li>
+    {% endfor %}
+  </ul>
+</body>
+</html>
+

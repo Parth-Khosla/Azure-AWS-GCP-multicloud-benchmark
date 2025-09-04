@@ -1,0 +1,21 @@
+# AWS SDK
+boto3
+botocore
+
+# Azure SDKs
+azure-identity
+azure-mgmt-compute
+azure-mgmt-resource
+azure-mgmt-subscription
+
+# (Optional) GCP prep — safe to leave here, even if you don’t use it yet
+google-auth
+google-api-python-client
+
+# Utilities
+requests
+tabulate
+matplotlib
+
+flask
+tqdm
