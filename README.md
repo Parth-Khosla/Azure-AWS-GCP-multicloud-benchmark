@@ -36,21 +36,25 @@ The purpose of this project is to benchmark multiple cloud resources simultaneou
 - **Infrastructure as Code**: Terraform (or similar)  
 - **Containerization**: Docker  
 - **Visualization**: (Pending: matplotlib, plotly, or similar)
+- **CLI tools**: Azure CLI, AWS CLI, GCP CLI
 
 ---
 
 ## How to Run (Azure Module Example)
-1. Clone the repository:  
+1. Need to install Azure CLI tool and login using
+    ```
+    az login
+2. Clone the repository:  
    ```bash
    git clone <repo-url>
    cd multi-region-multi-cloud-benchmark
-2. Install requirements.txt
+3. Install requirements.txt
     ```bash
     pip install -r requirements.txt
-3. Run the flask app
+4. Run the flask app
     ```bash
     python app.py
-4. access the app on appropriate port(port 80 for now)
+5. access the app on appropriate port(port 80 for now)
 
 # Furture improvements
 
