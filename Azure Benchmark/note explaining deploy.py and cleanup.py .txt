@@ -1,0 +1,62 @@
+## `deploy.py`
+
+Purpose:
+Automates **multi-region VM deployment** in Azure using settings from `deployment_info.json`.
+
+### Key Flow:
+
+1. **Reads config** from `deployment_info.json` (VM name, size, OS image, regions).
+2. **Asks for subscription** → lists available Azure subscriptions via CLI login.
+3. **Deploys to multiple regions**:
+
+   * Creates a new resource group per region (prefix: `Bench-...`).
+   * Sets up VNet, Subnet, NIC, Public IP.
+   * Deploys VM with specified image & size.
+   * Logs deployment start/end times.
+4. **Outputs**:
+
+   * `JSON-data/deployment_log.json` → records VM deployment times per region.
+   * `deployment_time.png` → bar chart comparing deployment durations.
+   * `JSON-data/to_clean.json` → list of resource groups created (used later for cleanup).
+
+---
+
+##  `cleanup.py`
+
+Purpose:
+Automates **deletion of all resource groups** created by `deploy.py`.
+
+### Key Flow:
+
+1. Reads `JSON-data/to_clean.json` for the list of resource groups.
+2. Detects available subscriptions → you select one.
+3. For each resource group:
+
+   * Fires off **asynchronous delete requests** (does not wait for Azure’s slow cleanup).
+   * Skips entries that fail to start deletion.
+4. Updates `to_clean.json` → keeps only those that weren’t successfully queued for deletion.
+
+### Behavior:
+
+* Deleting a resource group removes **everything inside**:
+
+  * VMs
+  * VNets/Subnets
+  * NICs
+  * Public IPs
+  * Disks
+* Fast: script finishes in seconds while Azure cleans in background.
+
+---
+
+## ⚡ Workflow
+
+1. **Run `deploy.py`** → Deploys VMs to multiple regions.
+2. **Check `deployment_time.png`** → Compare performance.
+3. **Run `cleanup.py`** → Initiates deletion of all resource groups created.
+
+---
+
+👉 **Pro tip**: If cleanup fails (e.g., network hiccup), `to_clean.json` keeps the leftovers so you can rerun `cleanup.py` until empty.
+
+---
