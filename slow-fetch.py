@@ -1,69 +1,168 @@
+#!/usr/bin/env python3
+# fetch_all_os_vm_info_full_aws.py
+"""
+Full Mode:
+- Fetches all AMIs owned by 'amazon' (exhaustive)
+- Runs region fetches concurrently using ThreadPoolExecutor + asyncio
+- Saves JSON and a full HTML report
+"""
+
 import asyncio
-import boto3
 import concurrent.futures
 import json
+import time
+from datetime import datetime
+from functools import partial
+
+import boto3
+from botocore.exceptions import ClientError
 from tqdm import tqdm
 from tabulate import tabulate
 
-# Regions to query
-REGIONS = ["us-east-1", "us-west-1", "us-west-2", "ap-south-1"]
+# CONFIG
+REGIONS = ["us-east-1", "us-west-1", "us-west-2", "eu-central-1", "ap-south-1"]
+MAX_WORKERS = 32
+OUTPUT_JSON = "aws_full_data.json"
+OUTPUT_HTML = "aws_full_data.html"
 
 session = boto3.Session()
 
-def fetch_ami_images(region):
+
+def _retry(fn, retries=4, backoff=1.0, *args, **kwargs):
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            return fn(*args, **kwargs)
+        except ClientError as e:
+            last_exc = e
+            sleep = backoff * attempt
+            time.sleep(sleep)
+    raise last_exc
+
+
+def fetch_ami_images_full(region):
+    """Synchronous: fetch ALL AMIs owned by 'amazon' for a region"""
     ec2 = session.client("ec2", region_name=region)
-    paginator = ec2.get_paginator("describe_images")
-    images = []
-    for page in paginator.paginate(Owners=["amazon"]):
-        for img in page["Images"]:
-            images.append({
-                "region": region,
-                "id": img["ImageId"],
-                "name": img.get("Name", "N/A")
-            })
-    return images
+    # describe_images doesn't have paginator; it may return massive data. We call once and then sort/trim if needed.
+    resp = _retry(partial(ec2.describe_images, Owners=["amazon"], Filters=[{"Name": "state", "Values": ["available"]}]))
+    images = resp.get("Images", [])
+    out = []
+    for img in images:
+        out.append({
+            "region": region,
+            "image_id": img.get("ImageId"),
+            "name": img.get("Name", "N/A"),
+            "owner": img.get("OwnerId"),
+            "creation_date": img.get("CreationDate"),
+            "description": img.get("Description", "")
+        })
+    # Optionally sort newest first (do not trim for full mode)
+    out_sorted = sorted(out, key=lambda i: i.get("creation_date", ""), reverse=True)
+    return out_sorted
+
 
 def fetch_instance_types(region):
+    """Synchronous: fetch all instance types (paginated) for a region"""
     ec2 = session.client("ec2", region_name=region)
     paginator = ec2.get_paginator("describe_instance_types")
-    types = []
+    out = []
     for page in paginator.paginate():
-        for itype in page["InstanceTypes"]:
-            types.append({
+        for it in page.get("InstanceTypes", []):
+            out.append({
                 "region": region,
-                "type": itype["InstanceType"],
-                "vcpu": itype["VCpuInfo"]["DefaultVCpus"],
-                "memory": itype["MemoryInfo"]["SizeInMiB"]
+                "instance_type": it.get("InstanceType"),
+                "vcpu": it.get("VCpuInfo", {}).get("DefaultVCpus"),
+                "memory_mb": it.get("MemoryInfo", {}).get("SizeInMiB")
             })
-    return types
+    return out
+
+
+def make_html_report(images, instances, out_file):
+    """Produce a slightly larger HTML report for full mode"""
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    header = f"""
+    <html>
+    <head>
+      <meta charset="utf-8"/>
+      <title>AWS Full AMI & Instance Report</title>
+      <style>
+        body{{font-family: Arial, Helvetica, sans-serif; padding:20px; background:#f8f9fb}}
+        h1,h2{{color:#222}}
+        .card{{background:#fff; padding:16px; margin-bottom:20px; border-radius:8px; box-shadow:0 2px 10px rgba(0,0,0,0.06)}}
+        table{{width:100%; border-collapse:collapse}}
+        th,td{{padding:6px 8px; border:1px solid #eee; text-align:left; font-size:12px}}
+        .small{{font-size:12px; color:#666}}
+      </style>
+    </head>
+    <body>
+      <h1>AWS Full AMI & Instance Report</h1>
+      <div class="small">Generated: {ts}</div>
+      <div class="card">
+        <h2>AMIs (amazon-owned, exhaustive)</h2>
+    """
+    # To avoid rendering a multi-megabyte HTML, cap preview to first 500 rows
+    preview_limit = 500
+    if images:
+        head_table = tabulate(images[:preview_limit], headers="keys", tablefmt="html")
+        header += head_table
+        if len(images) > preview_limit:
+            header += f"<p class='small'>Showing first {preview_limit} of {len(images)} AMIs in the HTML. Full JSON contains everything.</p>"
+    else:
+        header += "<p>No AMIs found.</p>"
+
+    header += "</div><div class='card'><h2>Instance Types</h2>"
+    if instances:
+        header += tabulate(instances, headers="keys", tablefmt="html")
+    else:
+        header += "<p>No instance types found.</p>"
+
+    header += f"""
+      </div>
+      <div class="small">This report was generated by fetch_all_os_vm_info_full_aws.py</div>
+    </body>
+    </html>
+    """
+    with open(out_file, "w", encoding="utf-8") as fh:
+        fh.write(header)
+
+
+async def gather_all():
+    loop = asyncio.get_running_loop()
+    images_all = []
+    instances_all = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
+        # AMIs
+        ami_tasks = [loop.run_in_executor(exe, fetch_ami_images_full, r) for r in REGIONS]
+        for fut in tqdm(asyncio.as_completed(ami_tasks), total=len(ami_tasks), desc="Fetching AMIs (full)"):
+            res = await fut
+            images_all.extend(res)
+
+        # Instance types
+        inst_tasks = [loop.run_in_executor(exe, fetch_instance_types, r) for r in REGIONS]
+        for fut in tqdm(asyncio.as_completed(inst_tasks), total=len(inst_tasks), desc="Fetching Instance Types"):
+            res = await fut
+            instances_all.extend(res)
+
+    return images_all, instances_all
+
 
 async def main():
-    loop = asyncio.get_event_loop()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=32)
+    print("⚡ Starting async fetch (FULL mode) for AWS AMIs & Instance Types...\n")
+    start = time.time()
+    images, instances = await gather_all()
+    duration = time.time() - start
 
-    print("⚡ Starting async fetch (All AMIs)...")
+    payload = {"amis": images, "instance_types": instances, "meta": {"regions": REGIONS, "mode": "full", "duration_seconds": duration}}
+    with open(OUTPUT_JSON, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, default=str)
 
-    # AMIs
-    ami_tasks = [loop.run_in_executor(executor, fetch_ami_images, r) for r in REGIONS]
-    amis = []
-    for f in tqdm(asyncio.as_completed(ami_tasks), total=len(ami_tasks), desc="Fetching AMIs"):
-        amis.extend(await f)
+    make_html_report(images, instances, OUTPUT_HTML)
 
-    # Instance types
-    itype_tasks = [loop.run_in_executor(executor, fetch_instance_types, r) for r in REGIONS]
-    instance_types = []
-    for f in tqdm(asyncio.as_completed(itype_tasks), total=len(itype_tasks), desc="Fetching Instance Types"):
-        instance_types.extend(await f)
+    print(f"\n✅ Done. Regions: {len(REGIONS)}. AMIs fetched: {len(images)}. Instance types: {len(instances)}")
+    print(f"Saved -> {OUTPUT_JSON} , {OUTPUT_HTML}")
+    print(f"Elapsed: {duration:.1f}s")
 
-    # Save
-    data = {"amis": amis, "instance_types": instance_types}
-    with open("aws_full_data.json", "w") as f:
-        json.dump(data, f, indent=2)
-
-    # Table
-    table = [(a["region"], a["id"], a["name"]) for a in amis[:20]]
-    print(tabulate(table, headers=["Region", "AMI ID", "Name"]))
-    print("\n✅ Data saved to aws_full_data.json")
 
 if __name__ == "__main__":
     asyncio.run(main())
