@@ -1,79 +1,184 @@
+#!/usr/bin/env python3
+# fetch_all_os_vm_info_fast_aws.py
+"""
+Fast Mode:
+- Filters AMIs to major OS families (Ubuntu, Amazon Linux 2, RHEL, Windows)
+- Runs region fetches concurrently using ThreadPoolExecutor + asyncio
+- Saves JSON and a pretty HTML report
+"""
+
 import asyncio
-import boto3
 import concurrent.futures
 import json
+import time
+from datetime import datetime
+from functools import partial
+
+import boto3
+from botocore.exceptions import ClientError
 from tqdm import tqdm
 from tabulate import tabulate
 
-# Regions to query
-REGIONS = ["us-east-1", "us-west-1", "us-west-2", "ap-south-1"]
+# CONFIG
+REGIONS = ["us-east-1", "us-west-1", "us-west-2", "eu-central-1", "ap-south-1"]
+MAX_WORKERS = 32
+LATEST_PER_REGION = 50
+OUTPUT_JSON = "aws_fast_data.json"
+OUTPUT_HTML = "aws_fast_data.html"
 
-# OS filters (major families)
+# AMI filters (reduce noise)
 AMI_FILTERS = [
     {"Name": "name", "Values": [
         "ubuntu/images/*",
         "amzn2-ami-hvm-*",
         "RHEL-*",
         "Windows_Server-*"
-    ]}
+    ]},
+    {"Name": "state", "Values": ["available"]}
 ]
 
 session = boto3.Session()
 
+
+def _retry(fn, retries=3, backoff=1.5, *args, **kwargs):
+    """Simple retry wrapper for boto3 calls"""
+    last_exc = None
+    for attempt in range(1, retries + 1):
+        try:
+            return fn(*args, **kwargs)
+        except ClientError as e:
+            last_exc = e
+            sleep = backoff * attempt
+            time.sleep(sleep)
+    raise last_exc
+
+
 def fetch_ami_images(region):
+    """Synchronous: fetch filtered AMIs for a region, return latest N"""
     ec2 = session.client("ec2", region_name=region)
-    paginator = ec2.get_paginator("describe_images")
-    images = []
-    for page in paginator.paginate(Owners=["amazon"], Filters=AMI_FILTERS):
-        for img in page["Images"]:
-            images.append({
-                "region": region,
-                "id": img["ImageId"],
-                "name": img.get("Name", "N/A")
-            })
-    return images
+    # describe_images is not paginated; use filters and owners
+    resp = _retry(partial(ec2.describe_images, Owners=["amazon"], Filters=AMI_FILTERS))
+    images = resp.get("Images", [])
+    # Keep latest by CreationDate
+    images_sorted = sorted(images, key=lambda i: i.get("CreationDate", ""), reverse=True)[:LATEST_PER_REGION]
+    out = []
+    for img in images_sorted:
+        out.append({
+            "region": region,
+            "image_id": img.get("ImageId"),
+            "name": img.get("Name", "N/A"),
+            "owner": img.get("OwnerId"),
+            "creation_date": img.get("CreationDate")
+        })
+    return out
+
 
 def fetch_instance_types(region):
+    """Synchronous: fetch all instance types (paginated) for a region"""
     ec2 = session.client("ec2", region_name=region)
     paginator = ec2.get_paginator("describe_instance_types")
-    types = []
+    out = []
     for page in paginator.paginate():
-        for itype in page["InstanceTypes"]:
-            types.append({
+        for it in page.get("InstanceTypes", []):
+            out.append({
                 "region": region,
-                "type": itype["InstanceType"],
-                "vcpu": itype["VCpuInfo"]["DefaultVCpus"],
-                "memory": itype["MemoryInfo"]["SizeInMiB"]
+                "instance_type": it.get("InstanceType"),
+                "vcpu": it.get("VCpuInfo", {}).get("DefaultVCpus"),
+                "memory_mb": it.get("MemoryInfo", {}).get("SizeInMiB")
             })
-    return types
+    return out
+
+
+def make_html_report(images, instances, out_file):
+    """Generate a basic HTML report (uses tabulate to produce HTML tables)"""
+    ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    head = f"""
+    <html>
+    <head>
+      <meta charset="utf-8"/>
+      <title>AWS Fast AMI & Instance Report</title>
+      <style>
+        body{{font-family: Arial, Helvetica, sans-serif; padding:20px; background:#f7f7f7}}
+        h1,h2{{color:#222}}
+        .card{{background:#fff; padding:16px; margin-bottom:20px; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,0.08)}}
+        table{{width:100%; border-collapse:collapse}}
+        th,td{{padding:6px 8px; border:1px solid #eee; text-align:left; font-size:13px}}
+        .small{{font-size:12px; color:#666}}
+      </style>
+    </head>
+    <body>
+      <h1>AWS Fast AMI & Instance Report</h1>
+      <div class="small">Generated: {ts}</div>
+      <div class="card">
+        <h2>Sample AMIs (filtered, latest {LATEST_PER_REGION} per region)</h2>
+    """
+    # Show first 200 rows max in HTML to avoid huge pages
+    max_preview = 200
+    img_preview = images[:max_preview]
+    if img_preview:
+        html_table = tabulate(img_preview, headers="keys", tablefmt="html")
+        head += html_table
+    else:
+        head += "<p>No AMIs found.</p>"
+
+    head += """
+      </div>
+      <div class="card">
+        <h2>Instance Types</h2>
+    """
+    inst_preview = instances[:max_preview]
+    if inst_preview:
+        head += tabulate(inst_preview, headers="keys", tablefmt="html")
+    else:
+        head += "<p>No instance types found.</p>"
+    head += """
+      </div>
+      <div class="small">This report was generated by fetch_all_os_vm_info_fast_aws.py</div>
+    </body></html>
+    """
+    with open(out_file, "w", encoding="utf-8") as fh:
+        fh.write(head)
+
+
+async def gather_all():
+    loop = asyncio.get_running_loop()
+    images_all = []
+    instances_all = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as exe:
+        # schedule AMI fetches
+        ami_futures = [loop.run_in_executor(exe, fetch_ami_images, r) for r in REGIONS]
+        for fut in tqdm(asyncio.as_completed(ami_futures), total=len(ami_futures), desc="Fetching AMIs"):
+            res = await fut
+            images_all.extend(res)
+
+        # schedule instance types fetches
+        inst_futures = [loop.run_in_executor(exe, fetch_instance_types, r) for r in REGIONS]
+        for fut in tqdm(asyncio.as_completed(inst_futures), total=len(inst_futures), desc="Fetching Instance Types"):
+            res = await fut
+            instances_all.extend(res)
+
+    return images_all, instances_all
+
 
 async def main():
-    loop = asyncio.get_event_loop()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=32)
+    print("⚡ Starting async fetch (FAST mode) for AWS AMIs & Instance Types...\n")
+    start = time.time()
+    images, instances = await gather_all()
+    duration = time.time() - start
 
-    print("⚡ Starting async fetch (Relevant AMIs Only)...")
+    # Save JSON
+    payload = {"amis": images, "instance_types": instances, "meta": {"regions": REGIONS, "mode": "fast", "duration_seconds": duration}}
+    with open(OUTPUT_JSON, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, default=str)
 
-    # AMIs
-    ami_tasks = [loop.run_in_executor(executor, fetch_ami_images, r) for r in REGIONS]
-    amis = []
-    for f in tqdm(asyncio.as_completed(ami_tasks), total=len(ami_tasks), desc="Fetching AMIs"):
-        amis.extend(await f)
+    # Make HTML
+    make_html_report(images, instances, OUTPUT_HTML)
 
-    # Instance types
-    itype_tasks = [loop.run_in_executor(executor, fetch_instance_types, r) for r in REGIONS]
-    instance_types = []
-    for f in tqdm(asyncio.as_completed(itype_tasks), total=len(itype_tasks), desc="Fetching Instance Types"):
-        instance_types.extend(await f)
+    print(f"\n✅ Done. Regions: {len(REGIONS)}. AMIs fetched: {len(images)}. Instance types: {len(instances)}")
+    print(f"Saved -> {OUTPUT_JSON} , {OUTPUT_HTML}")
+    print(f"Elapsed: {duration:.1f}s")
 
-    # Save
-    data = {"amis": amis, "instance_types": instance_types}
-    with open("aws_fast_data.json", "w") as f:
-        json.dump(data, f, indent=2)
-
-    # Table
-    table = [(a["region"], a["id"], a["name"]) for a in amis[:20]]
-    print(tabulate(table, headers=["Region", "AMI ID", "Name"]))
-    print("\n✅ Data saved to aws_fast_data.json")
 
 if __name__ == "__main__":
     asyncio.run(main())
