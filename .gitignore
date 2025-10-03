@@ -1,1 +1,3 @@
 /2-venv
+*.json
+*.html
