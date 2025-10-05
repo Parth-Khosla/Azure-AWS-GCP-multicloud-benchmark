@@ -235,3 +235,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+#note : investigate result for t2.micro and t3.micro instances
