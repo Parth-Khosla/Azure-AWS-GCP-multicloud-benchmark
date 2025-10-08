@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-AWS Deployment Script (Resilient & Per-Region)
+AWS Deployment Script (Clean Start & Resilient)
 - Reads config.json
 - Iterates over each region config
 - Creates EC2 instances
 - Measures deployment time
 - Handles failures gracefully
+- Deletes previous deployed_resources.json & deployment_times.json
 - Saves:
   1. deployed_resources.json → VM ID, key, security group, etc.
   2. deployment_times.json → deployment start/end times
@@ -81,7 +82,18 @@ def display_summary_table(resources_file):
     print(tabulate(table_data, headers=headers, tablefmt="grid"))
 
 
+def clean_previous_data():
+    """Delete previous deployment JSON files if they exist"""
+    for file in [RESOURCES_FILE, TIMES_FILE]:
+        if os.path.exists(file):
+            os.remove(file)
+            print(f"🗑️ Deleted previous {file}")
+
+
 def main():
+    # Delete previous deployment data
+    clean_previous_data()
+
     configs = load_config()
     print(f"🚀 Deploying to {len(configs)} region(s)")
 
