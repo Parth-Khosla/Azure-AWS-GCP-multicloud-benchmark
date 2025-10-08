@@ -1,148 +1,102 @@
 #!/usr/bin/env python3
 """
-AWS Deployment Configurator — Final Version
-Reads confirmed regions from selected_region.json,
-validates AMI and VM selections, displays a summary table,
-and saves the configuration to deployment_config.json.
+AWS Deployment Config Generator (Interactive)
+---------------------------------------------
+Reads regions from 'select_regions.json', gathers user inputs for
+each region, and shows a tabular summary before saving to 'config.json'.
 """
 
 import json
-import os
+from pathlib import Path
 from tabulate import tabulate
 
-# === File Paths ===
-AMI_FILE = "aws_all_os_amis.json"
-VM_FILE = "aws_all_vm_types.json"
-REGIONS_FILE = "selected_regions.json"
-DEPLOYMENT_CONFIG = "deployment_config.json"
+SELECTED_REGIONS_FILE = Path("selected_regions.json")
+OUTPUT_FILE = Path("config.json")
 
-# === Helper Functions ===
 
-def load_json(path):
-    """Safely load a JSON file."""
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"❌ File not found: {path}")
-    with open(path, "r") as f:
-        return json.load(f)
+def load_regions():
+    """Load list of regions from select_regions.json"""
+    if not SELECTED_REGIONS_FILE.exists():
+        print(f"❌ Missing file: {SELECTED_REGIONS_FILE}")
+        print("Please create a JSON file like: [\"us-east-1\", \"ap-south-1\"]")
+        exit(1)
+    try:
+        with open(SELECTED_REGIONS_FILE, "r") as f:
+            regions = json.load(f)
+            if not isinstance(regions, list):
+                raise ValueError("Invalid JSON format: must be a list of regions")
+            return regions
+    except json.JSONDecodeError as e:
+        print(f"❌ Error parsing {SELECTED_REGIONS_FILE}: {e}")
+        exit(1)
 
-def find_ami_entry(ami_data, regions, key, value, arch):
-    """
-    Search AMI by Name or ImageId with architecture filter across all regions.
-    Returns the first match found and its region.
-    """
-    for region in regions:
-        region_data = ami_data.get(region, {})
-        for owner, entries in region_data.items():
-            for entry in entries:
-                if entry.get(key) == value and entry.get("Architecture") == arch:
-                    return region, entry
-    return None, None
 
-def find_vm_entry(vm_data, regions, instance_type):
-    """
-    Find instance type info within available regions.
-    Returns the first match found and its region.
-    """
-    for region in regions:
-        for region_entry in vm_data:
-            if region_entry.get("region") == region:
-                for inst in region_entry["instance_types"]:
-                    if inst["InstanceType"] == instance_type:
-                        return region, inst
-    return None, None
+def ask_user_for_region_config(region):
+    """Prompt user for deployment settings for a given region"""
+    print(f"\n🗺️  Configuring deployment for region: {region}")
+    ami_name = input("   → AMI Name (e.g., Ubuntu Server 24.04 LTS): ").strip()
+    ami_id = input("   → AMI ID (region-specific): ").strip()
+    instance_type = input("   → Instance Type (default: t2.micro): ").strip() or "t2.micro"
 
-def save_deployment_config(regions, ami_entry, vm_entry):
-    """Save the confirmed configuration to deployment_config.json"""
-    config = {
-        "Regions": regions,
-        "AMI": {
-            "ImageId": ami_entry["ImageId"],
-            "Name": ami_entry["Name"],
-            "Architecture": ami_entry["Architecture"],
-            "Description": ami_entry.get("Description", "N/A"),
-            "CreationDate": ami_entry.get("CreationDate", "N/A")
-        },
-        "VM": {
-            "InstanceType": vm_entry["InstanceType"],
-            "vCPUs": vm_entry["vCPUs"],
-            "MemoryMiB": vm_entry["MemoryMiB"],
-            "Storage": vm_entry["Storage"],
-            "NetworkPerformance": vm_entry["NetworkPerformance"],
-            "FreeTier": vm_entry["FreeTier"]
-        }
+    while True:
+        arch = input("   → Architecture [x86_64 / arm64] (default: x86_64): ").strip().lower() or "x86_64"
+        if arch in ["x86_64", "arm64"]:
+            break
+        print("     ⚠️ Please choose either 'x86_64' or 'arm64'")
+
+    return {
+        "region": region,
+        "ami_name": ami_name,
+        "ami_id": ami_id,
+        "instance_type": instance_type,
+        "architecture": arch
     }
 
-    with open(DEPLOYMENT_CONFIG, "w") as f:
-        json.dump(config, f, indent=2)
 
-    print(f"\n✅ Deployment configuration saved to: {DEPLOYMENT_CONFIG}")
+def display_summary(configs):
+    """Display a table summarizing all region configurations"""
+    table_data = [
+        [
+            c["region"],
+            c["ami_name"],
+            c["ami_id"],
+            c["instance_type"],
+            c["architecture"]
+        ]
+        for c in configs
+    ]
+    headers = ["Region", "AMI Name", "AMI ID", "Instance Type", "Architecture"]
+    print("\n📋 Configuration Summary:\n")
+    print(tabulate(table_data, headers=headers, tablefmt="grid"))
 
-# === Main ===
 
 def main():
-    print("🚀 AWS Deployment Configurator\n")
+    print("🚀 AWS Deployment Config Generator\n")
 
-    # Load data
-    try:
-        regions = load_json(REGIONS_FILE)
-        print(f"🌍 Loaded confirmed regions: {regions}")
-    except Exception as e:
-        print(f"❌ Failed to load regions from {REGIONS_FILE}: {e}")
+    regions = load_regions()
+    print(f"📦 Loaded {len(regions)} regions: {', '.join(regions)}")
+
+    configs = []
+    for region in regions:
+        region_config = ask_user_for_region_config(region)
+        configs.append(region_config)
+
+    # Show tabular summary
+    display_summary(configs)
+
+    # Ask for confirmation
+    confirm = input("\n💾 Save this configuration to config.json? [Y/n]: ").strip().lower()
+    if confirm not in ["", "y", "yes"]:
+        print("❌ Operation cancelled. Nothing was saved.")
         return
 
-    try:
-        ami_data = load_json(AMI_FILE)
-    except Exception as e:
-        print(f"❌ Failed to load AMI data from {AMI_FILE}: {e}")
-        return
+    # Save the combined configuration
+    with open(OUTPUT_FILE, "w") as f:
+        json.dump(configs, f, indent=4)
 
-    try:
-        vm_data = load_json(VM_FILE)
-    except Exception as e:
-        print(f"❌ Failed to load VM data from {VM_FILE}: {e}")
-        return
+    print(f"\n✅ Configuration saved to {OUTPUT_FILE.resolve()}")
+    print("   You can now use this file to deploy region-specific AMIs.")
 
-    # User inputs
-    ami_input = input("\nEnter AMI Name or ImageId: ").strip()
-    architecture = input("Enter Architecture (x86_64 / arm64): ").strip()
-    instance_type = input("Enter VM Instance Type: ").strip()
-
-    search_key = "ImageId" if ami_input.startswith("ami-") else "Name"
-
-    # Find AMI and VM
-    ami_region, ami_entry = find_ami_entry(ami_data, regions, search_key, ami_input, architecture)
-    vm_region, vm_entry = find_vm_entry(vm_data, regions, instance_type)
-
-    if not ami_entry:
-        print("❌ No matching AMI found in any of the selected regions.")
-        return
-    if not vm_entry:
-        print("❌ No matching VM type found in any of the selected regions.")
-        return
-
-    # Display summary table
-    table = [
-        ["Architecture", architecture],
-        ["AMI Name", ami_entry["Name"]],
-        ["Image ID", ami_entry["ImageId"]],
-        ["Description", ami_entry.get("Description", "N/A")],
-        ["Creation Date", ami_entry.get("CreationDate", "N/A")],
-        ["Instance Type", vm_entry["InstanceType"]],
-        ["vCPUs", vm_entry["vCPUs"]],
-        ["Memory (MiB)", vm_entry["MemoryMiB"]],
-        ["Storage", vm_entry["Storage"]],
-        ["Network Performance", vm_entry["NetworkPerformance"]],
-        ["Free Tier Eligible", "✅ Yes" if vm_entry["FreeTier"] else "❌ No"]
-    ]
-
-    print("\n📋 Deployment Summary:\n")
-    print(tabulate(table, headers=["Property", "Value"], tablefmt="fancy_grid"))
-
-    confirm = input("\nConfirm deployment configuration? (y/n): ").strip().lower()
-    if confirm == "y":
-        save_deployment_config(regions, ami_entry, vm_entry)
-    else:
-        print("❌ Deployment cancelled.")
 
 if __name__ == "__main__":
     main()
