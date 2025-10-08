@@ -30,7 +30,7 @@ def save_json(path, data):
         json.dump(data, f, indent=2)
 
 def generate_html(regions):
-    """Generate a simple HTML page with checkboxes to select regions"""
+    """Generate a simple HTML page with checkboxes to select regions """
     checkboxes = "".join(
         f'<label><input type="checkbox" value="{r}"> {r}</label><br>'
         for r in regions
@@ -98,7 +98,7 @@ def launch_selector(port=5000, open_browser=True):
 
     @app.route("/")
     def serve_html():
-        return send_from_directory(".", REGIONS_HTML_FILE.name)
+        return send_from_directory(OUTPUT_DIR.resolve(), REGIONS_HTML_FILE.name)
 
     @app.route("/save", methods=["POST"])
     def save_selection():
