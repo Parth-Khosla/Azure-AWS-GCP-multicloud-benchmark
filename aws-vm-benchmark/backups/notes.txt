@@ -1,1 +1,0 @@
-this folder stores previously used files to avoid clutter in the main directory
